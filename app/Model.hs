@@ -36,7 +36,7 @@ data Content =
              | AskHistory         -- Ask
              | History [Message]  -- Return last messages
 
-             -- kell queries
+             -- Haskell queries
              | HaskellSearch String
              | HaskellExpression String
 
@@ -44,6 +44,9 @@ data Content =
 
              deriving (Eq, Ord, Read, Show, Generic)
 
+-- We need to derive instances for Flat (binary serialisation so that our values can be tranferred on the network)
+-- and Model (so that their structure can be picked up by the system)
+-- both instances are derived automatically provided that our data type derive Generic
 instance Flat Message
 instance Flat Subject
 instance Flat Content
