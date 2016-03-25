@@ -8,13 +8,16 @@ TODOs:
 module Main where
 
 import           Control.Concurrent.Async
+import           Control.Monad
 import           Control.Monad.Trans.State
 import           Data.List
 import           Data.Maybe
+import           Data.Pattern
 import           Model
 import           Network.Router.API
 import           Pipes                     (Consumer')
 import           Pipes.Prelude             (stdinLn)
+import           System.Environment
 
 type ChatM = StateT ChatState IO
 
@@ -22,65 +25,78 @@ data ChatState = ChatState {
   shownHistory::Bool -- Have we already shown history (previous messages)? This is set to false after the initial display to avoid redoing it again.
   }
 
+-- Program invoked as:
+-- hchat <Input> <Output> <Debug>
+-- To avoid problems with user input and message mixing up in the terminal,
+-- run one instance in Input and another in Output mode.
+
+data Mode = Input
+          | Output
+          | Debug
+          deriving (Eq,Read,Show)
+
 t = main
 
 main = do
-  -- Uncomment this to see messages being sent and received
-  -- logLevel DEBUG
-
-  userName <- getName
-
   -- The subject of the discussion
   let subjL = ["Haskell","Meeting","Firenze","26 Marzo 2016","Sessione: Applicazioni Distribuite"]
   let subj = Subject subjL
-  let msg = Message userName subj
-
-  putStrLn $ unlines [""
-                     ,"Help:"
-                     ,"To send a message: just enter it and press return."
-                     ,"To exit: Ctrl-D." --,"To exit: enter . (a single full stop)"
-                     ]
 
   putStrLn $ unwords ["Current Subject:",prettySubject (Subject []) subj,"\n"]
 
+  -- get program options
+  opts <- map read <$> getArgs
 
-  -- In a real chat system, it would be wasteful to receive messages about every subject
-  -- To filter them at the source, to get only messages about
-  -- the subject of our interest and its sub subjects:
-  -- bySubject :: Pattern .. -> Pattern ..
-  -- let bySubject = $(filterPatternQ [p|Message _ (Subject subj) _|])
-  -- runClient def (byPattern (Proxy::Proxy Message) (bySubject (prefixPattern subjL))) $ \conn -> do
-  -- NOTE: this is not fully implemented yet so we won't be using it during the meeting
+  let has = (`elem` (if null opts then [Input,Output] else opts))
+  let on mode val = if has mode then [val] else []
 
-  -- Receive/Send values of type Message
-  runClient def (byType (Proxy::Proxy Message)) $ \conn -> do
+  -- See raw messages being sent and received
+  when (has Debug) $ logLevel DEBUG
 
-     -- We can use two different systems to exchange messages:
-     -- Either we use send/receive, as in:
-    let sendOne = send conn . msg
-    -- Or we use pipes with pipeIn/pipeOut (see the beautiful Pipes package for more info: http://hackage.haskell.org/package/pipes) as in:
-    -- let sendOne c = runEffect $ yield (msg c) >-> pipeOut conn
-
-    -- Let everybody know that we joined the discussion
-    sendOne Join
-
-    -- Then ask for recent messages
-    sendOne AskHistory
-
-    -- Asynchronously, receive messages and display them
-    -- We use a simple pipe, to get a message from the connection (pipeIn) and print it
-    printMessagesTask <- async $ execStateT (runEffect $ pipeIn conn >-> printMessage subj) (ChatState False)
-
-    -- Another pipe, to read lines from the user (stdinLn) and send them out (pipeOut)
-    runEffect $ for stdinLn (\txt -> unless (null txt) (yield . msg . TextMessage $ txt)) >-> pipeOut conn
-
-    -- The user has had enough, time to say goodbye
-    sendOne Leave
-
-    -- And to cancel the asynchronous receive-and-display messages pipe
-    cancel printMessagesTask
-
+  -- Start tasks
+  void $ (mapM (\f -> async $ f subj) $ on Input inputMode ++ on Output outputMode) >>= waitAnyCancel
   where
+
+    -- In a real chat system, it would be wasteful to receive messages about every subject
+    -- To filter them at the source, to get only messages about
+    -- the subject of our interest and its sub subjects:
+    -- bySubject :: Pattern .. -> Pattern ..
+    --let bySubject = $(filterPatternQ [p|Message _ (Subject subj) _|])
+    -- runClient def (byPattern (Proxy::Proxy Message) (bySubject (prefixPattern subjL))) $ \conn -> do
+    -- NOTE: this is not fully implemented yet so we won't be using it during the meeting
+
+     outputMode subj = runClient def (byType (Proxy::Proxy Message)) $ \conn ->
+       -- Asynchronously, receive messages and display them
+       -- We use a simple pipe, to get a message from the connection (pipeIn) and print it
+       void $ execStateT (runEffect $ pipeIn conn >-> printMessage subj) (ChatState False)
+
+     inputMode subj = runClient def (byType (Proxy::Proxy Message)) $ \conn -> do
+       userName <- getName
+
+       putStrLn $ unlines [""
+                      ,"Help:"
+                      ,"To send a message: just enter it and press return."
+                      ,"To exit: Ctrl-D." --,"To exit: enter . (a single full stop)"
+                      ]
+
+       let msg = Message userName subj
+       -- We can use two different systems to exchange messages:
+       -- Either we use send/receive, as in:
+       let sendOne = send conn . msg
+       -- Or we use pipes with pipeIn/pipeOut (see the beautiful Pipes package for more info: http://hackage.haskell.org/package/pipes) as in:
+       -- let sendOne c = runEffect $ yield (msg c) >-> pipeOut conn
+
+       -- Let everybody know that we joined the discussion
+       sendOne Join
+
+       -- Then ask for recent messages
+       sendOne AskHistory
+
+       -- Read lines from the user (stdinLn) and send them out (pipeOut)
+       runEffect $ for stdinLn (\txt -> unless (null txt) (yield . msg . TextMessage $ txt)) >-> pipeOut conn
+
+       -- The user has had enough, time to say goodbye
+       sendOne Leave
 
      getName = do
        putStrLn "Enter your name:"
@@ -99,7 +115,7 @@ printMessage subj = loop
           mmsg <- lift $ prettyMsg subj msg
              --case prettyMsg subj msg of
           case mmsg of
-             Just pr -> liftIO $ putStrLn pr -- yield pr
+             Just pr -> liftIO $ putStrLn pr
              Nothing -> return ()
         loop
 
@@ -126,4 +142,5 @@ prettySubject (Subject topSubj) (Subject subj) =
 
 inSubject :: Subject -> Subject -> Bool
 inSubject (Subject topSubj) (Subject subj) = topSubj `isPrefixOf` subj
+
 
