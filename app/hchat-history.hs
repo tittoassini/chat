@@ -1,6 +1,3 @@
-{-# LANGUAGE ScopedTypeVariables  #-}
-module Main where
-
 import           Model
 import           Control.Monad.Trans.State
 import           Network.Router.API
@@ -18,29 +15,17 @@ import           Network.Router.API
 
 t = main
 
+-- Non-persistent message store
 type HistoryM = StateT [Message] IO
 
 main = do
   -- Display messages sent and received
   logLevel DEBUG
 
-  -- Use local server
-  --let def2 = def {ip="127.0.0.1",port=8080}
-
-  -- Protect against crashes, restart on failure
-  forever $ do
-    -- Receive all values of type Message
-    Left (ex :: SomeException) <- try $ runClient def (byType (Proxy::Proxy Message)) $ \conn -> do
-
-      liftIO $ dbgS "connected"
-      execStateT (runEffect $ pipeIn conn >-> historyAgent >-> pipeOut conn) []
-
-    -- Something went wrong, wait a few seconds and restart
-    dbg ["Exited loop with error",concat ["'",show ex,"'"],"retrying in a bit."]
-    threadDelay $ seconds 5
+  runClientForever def (byType (Proxy::Proxy Message)) $ \conn ->
+    execStateT (runEffect $ pipeIn conn >-> historyAgent >-> pipeOut conn) []
 
    where
-     seconds = (* 1000000)
 
      historyAgent = do
        msg <- await
