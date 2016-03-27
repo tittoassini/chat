@@ -22,7 +22,7 @@ main = do
   -- Display messages sent and received
   logLevel DEBUG
 
-  runClientForever def (byType (Proxy::Proxy Message)) $ \conn ->
+  runClientForever def ByType $ \conn ->
     execStateT (runEffect $ pipeIn conn >-> historyAgent >-> pipeOut conn) []
 
    where

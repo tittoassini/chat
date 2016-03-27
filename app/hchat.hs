@@ -65,12 +65,12 @@ main = do
     -- runClient def (byPattern (Proxy::Proxy Message) (bySubject (prefixPattern subjL))) $ \conn -> do
     -- NOTE: this is not fully implemented yet so we won't be using it during the meeting
 
-     outputMode subj = runClient def (byType (Proxy::Proxy Message)) $ \conn ->
+     outputMode subj = runClient def ByType $ \conn ->
        -- Asynchronously, receive messages and display them
        -- We use a simple pipe, to get a message from the connection (pipeIn) and print it
        void $ execStateT (runEffect $ pipeIn conn >-> printMessage subj) (ChatState False)
 
-     inputMode subj = runClient def (byType (Proxy::Proxy Message)) $ \conn -> do
+     inputMode subj = runClient def ByType $ \conn -> do
        userName <- getName
 
        putStrLn $ unlines [""
